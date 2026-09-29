@@ -22,12 +22,12 @@ jobs:
           base64 --decode PulseGrid-source.zip.b64 > PulseGrid-source.zip
           unzip -q PulseGrid-source.zip
 
-      - name: Prepare install-safe package
+      - name: Prepare release package
         shell: bash
         run: |
-          sed -i "s/applicationId 'com.openai.pulsegrid'/applicationId 'app.pulsegrid.sequencer'/" PulseGrid/app/build.gradle
-          sed -i "s/versionCode 1/versionCode 2/" PulseGrid/app/build.gradle
-          sed -i "s/versionName '0.1.0'/versionName '0.1.1'/" PulseGrid/app/build.gradle
+          sed -i "s/applicationId 'com.openai.pulsegrid'/applicationId 'app.pulsegrid.release'/" PulseGrid/app/build.gradle
+          sed -i "s/versionCode 1/versionCode 3/" PulseGrid/app/build.gradle
+          sed -i "s/versionName '0.1.0'/versionName '0.1.2'/" PulseGrid/app/build.gradle
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -47,22 +47,34 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
+      - name: Build unsigned release APK
         working-directory: PulseGrid
-        run: gradle assembleDebug --stacktrace
+        run: gradle assembleRelease --stacktrace
 
-      - name: Verify APK signature and manifest
+      - name: Sign release APK
         shell: bash
         run: |
+          KEYSTORE="$RUNNER_TEMP/pulsegrid-release.jks"
+          keytool -genkeypair -noprompt             -keystore "$KEYSTORE"             -storepass pulsegrid2026             -keypass pulsegrid2026             -alias pulsegrid             -keyalg RSA -keysize 2048 -validity 10000             -dname "CN=PulseGrid,O=PulseGrid,C=FR"
+
+          ZIPALIGN=/usr/local/lib/android/sdk/build-tools/35.0.0/zipalign
           APKSIGNER=/usr/local/lib/android/sdk/build-tools/35.0.0/apksigner
           AAPT2=/usr/local/lib/android/sdk/build-tools/35.0.0/aapt2
-          "$APKSIGNER" verify --verbose --print-certs PulseGrid/app/build/outputs/apk/debug/app-debug.apk
-          "$AAPT2" dump badging PulseGrid/app/build/outputs/apk/debug/app-debug.apk | head -30
-          cp PulseGrid/app/build/outputs/apk/debug/app-debug.apk PulseGrid-v0.1.1-debug.apk
+
+          UNSIGNED=PulseGrid/app/build/outputs/apk/release/app-release-unsigned.apk
+          ALIGNED="$RUNNER_TEMP/PulseGrid-aligned.apk"
+          FINAL=PulseGrid-v0.1.2-release.apk
+
+          "$ZIPALIGN" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$APKSIGNER" sign             --ks "$KEYSTORE"             --ks-key-alias pulsegrid             --ks-pass pass:pulsegrid2026             --key-pass pass:pulsegrid2026             --out "$FINAL"             "$ALIGNED"
+
+          "$APKSIGNER" verify --verbose --print-certs "$FINAL"
+          "$AAPT2" dump badging "$FINAL" | head -30
+          ls -lh "$FINAL"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PulseGrid-v0.1.1-apk
-          path: PulseGrid-v0.1.1-debug.apk
+          name: PulseGrid-v0.1.2-release-apk
+          path: PulseGrid-v0.1.2-release.apk
           if-no-files-found: error
